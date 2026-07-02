@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, TouchEvent, useEffect, useMemo, useRef, useState } from "react";
 import { formatDate, formatHours, todayISO } from "@/lib/date-utils";
 import { supabase } from "@/lib/supabase";
 import type { DayRecord, DayType, Project, TimeEntry } from "@/lib/types";
@@ -134,6 +134,7 @@ export function TimeTracker({
   const [status, setStatus] = useState("");
   const [isLoadingMonth, setIsLoadingMonth] = useState(true);
   const [isMonthlyListOpen, setIsMonthlyListOpen] = useState(false);
+  const touchStartX = useRef<number | null>(null);
 
   const activeProjects = useMemo(
     () => projects.filter((project) => project.active),
@@ -338,7 +339,7 @@ export function TimeTracker({
       resetEntryForm();
     }
 
-    setStatus("Day status saved.");
+    setStatus("");
     await loadMonthData();
   }
 
@@ -359,7 +360,7 @@ export function TimeTracker({
     }
 
     setProjectName("");
-    setStatus("Project added.");
+    setStatus("");
     await loadProjects();
   }
 
@@ -392,7 +393,7 @@ export function TimeTracker({
     }
 
     cancelProjectEdit();
-    setStatus("Project updated.");
+    setStatus("");
     await loadProjects();
     await loadMonthData();
   }
@@ -408,7 +409,7 @@ export function TimeTracker({
       return;
     }
 
-    setStatus("Project archived.");
+    setStatus("");
     await loadProjects();
   }
 
@@ -423,7 +424,7 @@ export function TimeTracker({
       return;
     }
 
-    setStatus("Project restored.");
+    setStatus("");
     await loadProjects();
   }
 
@@ -459,7 +460,7 @@ export function TimeTracker({
       return;
     }
 
-    setStatus("Project deleted.");
+    setStatus("");
     await loadProjects();
   }
 
@@ -505,7 +506,7 @@ export function TimeTracker({
     }
 
     resetEntryForm();
-    setStatus(editingEntryId ? "Entry updated." : "Entry saved.");
+    setStatus("");
     await loadMonthData();
   }
 
@@ -542,8 +543,26 @@ export function TimeTracker({
       resetEntryForm();
     }
 
-    setStatus("Entry deleted.");
+    setStatus("");
     await loadMonthData();
+  }
+
+  function handleCalendarTouchStart(event: TouchEvent<HTMLElement>) {
+    touchStartX.current = event.touches[0]?.clientX ?? null;
+  }
+
+  function handleCalendarTouchEnd(event: TouchEvent<HTMLElement>) {
+    if (touchStartX.current === null) return;
+
+    const endX = event.changedTouches[0]?.clientX;
+    if (typeof endX !== "number") return;
+
+    const deltaX = endX - touchStartX.current;
+    touchStartX.current = null;
+
+    if (Math.abs(deltaX) < 50) return;
+
+    setCurrentMonth((month) => addMonths(month, deltaX < 0 ? 1 : -1));
   }
 
   return (
@@ -565,13 +584,12 @@ export function TimeTracker({
               dayRecordByDate={dayRecordByDate}
               hoursByDate={hoursByDate}
               isLoading={isLoadingMonth}
+              onNextMonth={() => setCurrentMonth(addMonths(currentMonth, 1))}
               onOpenDay={openDay}
-            />
-
-            <MonthNavigation
-              onNext={() => setCurrentMonth(addMonths(currentMonth, 1))}
-              onPrevious={() => setCurrentMonth(addMonths(currentMonth, -1))}
+              onPreviousMonth={() => setCurrentMonth(addMonths(currentMonth, -1))}
               onToday={() => setCurrentMonth(monthStartISO(todayISO()))}
+              onTouchEnd={handleCalendarTouchEnd}
+              onTouchStart={handleCalendarTouchStart}
             />
           </section>
 
@@ -627,7 +645,6 @@ export function TimeTracker({
           monthlyList={monthlyList}
           monthlyListText={monthlyListText}
           onClose={() => setIsMonthlyListOpen(false)}
-          onCopied={() => setStatus("Monthly list copied.")}
         />
       ) : null}
     </main>
@@ -649,62 +666,67 @@ function MonthlySummaryPanel({ summary }: { summary: MonthlySummary }) {
   );
 }
 
-function MonthNavigation({
-  onNext,
-  onPrevious,
-  onToday
-}: {
-  onNext: () => void;
-  onPrevious: () => void;
-  onToday: () => void;
-}) {
-  return (
-    <nav className="grid grid-cols-3 gap-2">
-      <button
-        className="min-h-11 rounded-md border border-line bg-white px-3 py-2 font-semibold text-ink shadow-sm hover:bg-mist"
-        type="button"
-        onClick={onPrevious}
-      >
-        Prev
-      </button>
-      <button
-        className="min-h-11 rounded-md border border-line bg-white px-3 py-2 font-semibold text-ink shadow-sm hover:bg-mist"
-        type="button"
-        onClick={onToday}
-      >
-        Today
-      </button>
-      <button
-        className="min-h-11 rounded-md border border-line bg-white px-3 py-2 font-semibold text-ink shadow-sm hover:bg-mist"
-        type="button"
-        onClick={onNext}
-      >
-        Next
-      </button>
-    </nav>
-  );
-}
-
 function Calendar({
   currentMonth,
   days,
   dayRecordByDate,
   hoursByDate,
   isLoading,
-  onOpenDay
+  onNextMonth,
+  onOpenDay,
+  onPreviousMonth,
+  onToday,
+  onTouchEnd,
+  onTouchStart
 }: {
   currentMonth: string;
   days: CalendarDay[];
   dayRecordByDate: Map<string, DayRecord>;
   hoursByDate: Map<string, number>;
   isLoading: boolean;
+  onNextMonth: () => void;
   onOpenDay: (date: string) => void;
+  onPreviousMonth: () => void;
+  onToday: () => void;
+  onTouchEnd: (event: TouchEvent<HTMLElement>) => void;
+  onTouchStart: (event: TouchEvent<HTMLElement>) => void;
 }) {
   return (
-    <section className="rounded-md border border-line bg-white p-2 shadow-soft sm:p-4">
-      <div className="flex flex-col gap-2 border-b border-line pb-4 sm:flex-row sm:items-center sm:justify-between">
+    <section
+      className="rounded-md border border-line bg-white p-2 shadow-soft sm:p-4"
+      onTouchEnd={onTouchEnd}
+      onTouchStart={onTouchStart}
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-line pb-4">
         <h2 className="text-xl font-semibold text-ink">{formatMonth(currentMonth)}</h2>
-        {isLoading ? <span className="text-sm text-ink/60">Loading month...</span> : null}
+        <div className="flex items-center gap-1">
+          {isLoading ? (
+            <span className="hidden text-sm text-ink/60 sm:inline">Loading month...</span>
+          ) : null}
+          <button
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-line text-lg font-semibold text-ink hover:bg-mist"
+            type="button"
+            aria-label="Previous month"
+            onClick={onPreviousMonth}
+          >
+            {"<"}
+          </button>
+          <button
+            className="h-9 rounded-md border border-line px-2 text-sm font-semibold text-ink hover:bg-mist sm:px-3"
+            type="button"
+            onClick={onToday}
+          >
+            Today
+          </button>
+          <button
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-line text-lg font-semibold text-ink hover:bg-mist"
+            type="button"
+            aria-label="Next month"
+            onClick={onNextMonth}
+          >
+            {">"}
+          </button>
+        </div>
       </div>
 
       <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-wide text-ink/60 sm:mt-4 sm:gap-2 sm:text-xs">
@@ -948,20 +970,17 @@ function MonthlyListModal({
   monthLabel,
   monthlyList,
   monthlyListText,
-  onClose,
-  onCopied
+  onClose
 }: {
   monthLabel: string;
   monthlyList: MonthlyListDay[];
   monthlyListText: string;
   onClose: () => void;
-  onCopied: () => void;
 }) {
   async function copyMonthlyList() {
     if (!monthlyListText) return;
 
     await navigator.clipboard.writeText(monthlyListText);
-    onCopied();
   }
 
   return (
@@ -1071,7 +1090,7 @@ function EntryForm({
       </div>
 
       <fieldset disabled={formDisabled} className="disabled:opacity-60">
-        <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_140px]">
+        <div className="mt-4 grid gap-4">
           <label className="text-sm font-medium text-ink">
             Project
             <select
@@ -1092,17 +1111,25 @@ function EntryForm({
             </select>
           </label>
 
-          <label className="text-sm font-medium text-ink">
-            Hours
-            <input
-              className="mt-2 min-h-12 rounded-md border border-line bg-white px-3 py-3 text-base outline-none ring-blue/20 focus:ring-4"
-              min="0"
-              step="0.25"
-              type="number"
-              value={entryForm.hours}
-              onChange={(event) => onChange({ ...entryForm, hours: event.target.value })}
-            />
-          </label>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+            <label className="text-sm font-medium text-ink">
+              Hours
+              <input
+                className="mt-2 min-h-12 rounded-md border border-line bg-white px-3 py-3 text-base outline-none ring-blue/20 focus:ring-4"
+                min="0"
+                step="0.25"
+                type="number"
+                value={entryForm.hours}
+                onChange={(event) => onChange({ ...entryForm, hours: event.target.value })}
+              />
+            </label>
+            <button
+              className="min-h-12 rounded-md bg-ink px-4 py-3 font-semibold text-white hover:bg-moss disabled:cursor-not-allowed disabled:opacity-50"
+              type="submit"
+            >
+              {editingEntryId ? "Save" : "Add"}
+            </button>
+          </div>
         </div>
 
         <label className="mt-4 block text-sm font-medium text-ink">
@@ -1114,14 +1141,6 @@ function EntryForm({
           />
         </label>
       </fieldset>
-
-      <button
-        className="mt-4 min-h-12 w-full rounded-md bg-ink px-4 py-3 font-semibold text-white hover:bg-moss disabled:cursor-not-allowed disabled:opacity-50 sm:w-fit"
-        type="submit"
-        disabled={formDisabled}
-      >
-        {editingEntryId ? "Update entry" : "Add entry"}
-      </button>
     </form>
   );
 }
