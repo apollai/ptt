@@ -134,6 +134,9 @@ export function TimeTracker({
   const [status, setStatus] = useState("");
   const [isLoadingMonth, setIsLoadingMonth] = useState(true);
   const [isMonthlyListOpen, setIsMonthlyListOpen] = useState(false);
+  const [actionMenuDate, setActionMenuDate] = useState<string | null>(null);
+  const [quickDayTypeDate, setQuickDayTypeDate] = useState<string | null>(null);
+  const [quickDayType, setQuickDayType] = useState<DayType>("working_day");
   const touchStartX = useRef<number | null>(null);
 
   const activeProjects = useMemo(
@@ -334,6 +337,23 @@ export function TimeTracker({
     setStatus("");
   }
 
+  function openDayActions(date: string) {
+    setActionMenuDate(date);
+  }
+
+  function openNewEntryFromActions(date: string) {
+    setActionMenuDate(null);
+    openDay(date);
+  }
+
+  function openQuickDayType(date: string) {
+    const record = dayRecordByDate.get(date) ?? null;
+
+    setActionMenuDate(null);
+    setQuickDayTypeDate(date);
+    setQuickDayType(record?.day_type ?? "working_day");
+  }
+
   function closeDayModal() {
     setSelectedDate(null);
     setEditingEntryId(null);
@@ -367,6 +387,35 @@ export function TimeTracker({
       resetEntryForm();
     }
 
+    setStatus("");
+    await loadMonthData();
+  }
+
+  async function saveQuickDayType(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!quickDayTypeDate) return;
+
+    const record = dayRecordByDate.get(quickDayTypeDate) ?? null;
+    const payload = {
+      date: quickDayTypeDate,
+      day_type: quickDayType,
+      note: record?.note ?? null,
+      user_id: userId
+    };
+
+    const request = record
+      ? supabase.from("day_records").update(payload).eq("id", record.id)
+      : supabase.from("day_records").insert(payload);
+
+    const { error } = await request;
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setQuickDayTypeDate(null);
     setStatus("");
     await loadMonthData();
   }
@@ -613,6 +662,7 @@ export function TimeTracker({
               hoursByDate={hoursByDate}
               isLoading={isLoadingMonth}
               onNextMonth={() => setCurrentMonth(addMonths(currentMonth, 1))}
+              onOpenActions={openDayActions}
               onOpenDay={openDay}
               onPreviousMonth={() => setCurrentMonth(addMonths(currentMonth, -1))}
               onToday={() => setCurrentMonth(monthStartISO(todayISO()))}
@@ -675,6 +725,25 @@ export function TimeTracker({
           onClose={() => setIsMonthlyListOpen(false)}
         />
       ) : null}
+
+      {actionMenuDate ? (
+        <DayActionMenu
+          date={actionMenuDate}
+          onClose={() => setActionMenuDate(null)}
+          onNewEntry={() => openNewEntryFromActions(actionMenuDate)}
+          onSelectDayType={() => openQuickDayType(actionMenuDate)}
+        />
+      ) : null}
+
+      {quickDayTypeDate ? (
+        <QuickDayTypeModal
+          date={quickDayTypeDate}
+          dayType={quickDayType}
+          onClose={() => setQuickDayTypeDate(null)}
+          onDayTypeChange={setQuickDayType}
+          onSubmit={saveQuickDayType}
+        />
+      ) : null}
     </main>
   );
 }
@@ -701,6 +770,7 @@ function Calendar({
   hoursByDate,
   isLoading,
   onNextMonth,
+  onOpenActions,
   onOpenDay,
   onPreviousMonth,
   onToday,
@@ -713,6 +783,7 @@ function Calendar({
   hoursByDate: Map<string, number>;
   isLoading: boolean;
   onNextMonth: () => void;
+  onOpenActions: (date: string) => void;
   onOpenDay: (date: string) => void;
   onPreviousMonth: () => void;
   onToday: () => void;
@@ -776,6 +847,7 @@ function Calendar({
               day={day}
               dayType={record?.day_type ?? "working_day"}
               hours={hours}
+              onOpenActions={onOpenActions}
               onOpenDay={onOpenDay}
             />
           );
@@ -789,13 +861,17 @@ function CalendarCell({
   day,
   dayType,
   hours,
+  onOpenActions,
   onOpenDay
 }: {
   day: CalendarDay;
   dayType: DayType;
   hours: number;
+  onOpenActions: (date: string) => void;
   onOpenDay: (date: string) => void;
 }) {
+  const longPressTimer = useRef<number | null>(null);
+  const suppressClick = useRef(false);
   const today = todayISO();
   const explicitNonWorking = dayType !== "working_day";
   const overtime = Math.max(hours - 8, 0);
@@ -804,11 +880,49 @@ function CalendarCell({
   const todayClass = day.date === today ? "ring-2 ring-blue ring-offset-2 ring-offset-white" : "";
   const dimClass = day.inMonth ? "" : "opacity-35";
 
+  function clearLongPressTimer() {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }
+
+  function startLongPress() {
+    clearLongPressTimer();
+    suppressClick.current = false;
+    longPressTimer.current = window.setTimeout(() => {
+      suppressClick.current = true;
+      onOpenActions(day.date);
+    }, 600);
+  }
+
+  function cancelLongPress() {
+    clearLongPressTimer();
+  }
+
   return (
     <button
       className={`flex min-h-[72px] min-w-0 flex-col items-start gap-0.5 rounded-md border p-1.5 text-left transition hover:-translate-y-0.5 hover:shadow-soft sm:min-h-28 sm:gap-1 sm:p-2 ${toneClass} ${todayClass} ${dimClass}`}
       type="button"
-      onClick={() => onOpenDay(day.date)}
+      onClick={() => {
+        if (suppressClick.current) {
+          suppressClick.current = false;
+          return;
+        }
+
+        onOpenDay(day.date);
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onOpenActions(day.date);
+      }}
+      onMouseDown={startLongPress}
+      onMouseLeave={cancelLongPress}
+      onMouseUp={cancelLongPress}
+      onTouchCancel={cancelLongPress}
+      onTouchEnd={cancelLongPress}
+      onTouchMove={cancelLongPress}
+      onTouchStart={startLongPress}
     >
       <span className="text-sm font-semibold leading-none">{day.dayNumber}</span>
       {hours > 0 ? (
@@ -990,6 +1104,126 @@ function DayModal({
           </form>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DayActionMenu({
+  date,
+  onClose,
+  onNewEntry,
+  onSelectDayType
+}: {
+  date: string;
+  onClose: () => void;
+  onNewEntry: () => void;
+  onSelectDayType: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/35 sm:items-center sm:px-6 sm:py-6">
+      <div className="w-full rounded-t-2xl bg-paper p-3 shadow-soft sm:max-w-sm sm:rounded-md">
+        <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-line sm:hidden" />
+        <div className="rounded-md border border-line bg-white p-4">
+          <p className="text-sm font-semibold uppercase tracking-wide text-moss">
+            Day actions
+          </p>
+          <h2 className="mt-1 text-xl font-semibold text-ink">{formatDate(date)}</h2>
+
+          <div className="mt-4 grid gap-2">
+            <button
+              className="min-h-12 rounded-md bg-ink px-4 py-3 text-left font-semibold text-white hover:bg-moss"
+              type="button"
+              onClick={onNewEntry}
+            >
+              New time entry
+            </button>
+            <button
+              className="min-h-12 rounded-md border border-line px-4 py-3 text-left font-semibold text-ink hover:bg-mist"
+              type="button"
+              onClick={onSelectDayType}
+            >
+              Select day type
+            </button>
+            <button
+              className="min-h-11 rounded-md border border-line px-4 py-2 font-semibold text-ink hover:bg-mist"
+              type="button"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickDayTypeModal({
+  date,
+  dayType,
+  onClose,
+  onDayTypeChange,
+  onSubmit
+}: {
+  date: string;
+  dayType: DayType;
+  onClose: () => void;
+  onDayTypeChange: (value: DayType) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/35 sm:items-center sm:px-6 sm:py-6">
+      <form
+        className="w-full rounded-t-2xl bg-paper p-3 shadow-soft sm:max-w-sm sm:rounded-md"
+        onSubmit={onSubmit}
+      >
+        <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-line sm:hidden" />
+        <div className="rounded-md border border-line bg-white p-4">
+          <p className="text-sm font-semibold uppercase tracking-wide text-moss">
+            Select day type
+          </p>
+          <h2 className="mt-1 text-xl font-semibold text-ink">{formatDate(date)}</h2>
+
+          <div className="mt-4 grid gap-2">
+            {dayTypeOptions.map((option) => (
+              <label
+                key={option.value}
+                className={
+                  dayType === option.value
+                    ? "flex min-h-12 items-center gap-3 rounded-md border border-moss bg-green-50 px-3 py-3 font-semibold text-ink"
+                    : "flex min-h-12 items-center gap-3 rounded-md border border-line px-3 py-3 font-semibold text-ink"
+                }
+              >
+                <input
+                  checked={dayType === option.value}
+                  className="h-4 w-4"
+                  name="day-type"
+                  type="radio"
+                  value={option.value}
+                  onChange={() => onDayTypeChange(option.value)}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button
+              className="min-h-11 rounded-md border border-line px-4 py-2 font-semibold text-ink hover:bg-mist"
+              type="button"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+            <button
+              className="min-h-11 rounded-md bg-ink px-4 py-2 font-semibold text-white hover:bg-moss"
+              type="submit"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }
