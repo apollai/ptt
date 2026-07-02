@@ -191,6 +191,7 @@ export function TimeTracker({
   const [quickDayTypeDate, setQuickDayTypeDate] = useState<string | null>(null);
   const [quickDayType, setQuickDayType] = useState<DayType>("working_day");
   const touchStartX = useRef<number | null>(null);
+  const selectedDateRef = useRef<string | null>(null);
 
   const activeProjects = useMemo(
     () => projects.filter((project) => project.active),
@@ -319,6 +320,10 @@ export function TimeTracker({
   }, [currentMonth]);
 
   useEffect(() => {
+    selectedDateRef.current = selectedDate;
+  }, [selectedDate]);
+
+  useEffect(() => {
     if (!entryForm.projectId && activeProjects.length > 0) {
       setEntryForm((current) => ({
         ...current,
@@ -388,6 +393,7 @@ export function TimeTracker({
     setDayNote(record?.note ?? "");
     resetEntryForm();
     setStatus("");
+    void preselectPreviousProject(date);
   }
 
   function openDayActions(date: string) {
@@ -397,6 +403,37 @@ export function TimeTracker({
   function openNewEntryFromActions(date: string) {
     setActionMenuDate(null);
     openDay(date);
+  }
+
+  async function copyPreviousDayEntries(date: string) {
+    setActionMenuDate(null);
+
+    const previousEntries = await findPreviousEntries(date);
+
+    if (!previousEntries) return;
+
+    if (previousEntries.length === 0) {
+      setStatus("No previous working day with time entries was found.");
+      return;
+    }
+
+    const copiedEntries = previousEntries.map((entry) => ({
+      date,
+      project_id: entry.project_id,
+      hours: Number(entry.hours),
+      note: entry.note,
+      user_id: userId
+    }));
+
+    const { error } = await supabase.from("time_entries").insert(copiedEntries);
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setStatus("");
+    await loadMonthData();
   }
 
   function openQuickDayType(date: string) {
@@ -471,6 +508,57 @@ export function TimeTracker({
     setQuickDayTypeDate(null);
     setStatus("");
     await loadMonthData();
+  }
+
+  async function findPreviousEntries(date: string) {
+    const { data: previousDateRows, error: previousDateError } = await supabase
+      .from("time_entries")
+      .select("date")
+      .lt("date", date)
+      .order("date", { ascending: false })
+      .limit(1);
+
+    if (previousDateError) {
+      setStatus(previousDateError.message);
+      return null;
+    }
+
+    const previousDate = previousDateRows?.[0]?.date;
+
+    if (!previousDate) {
+      return [];
+    }
+
+    const { data, error } = await supabase
+      .from("time_entries")
+      .select("*, projects(id, name, active)")
+      .eq("date", previousDate)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      setStatus(error.message);
+      return null;
+    }
+
+    return (data ?? []) as TimeEntry[];
+  }
+
+  async function preselectPreviousProject(date: string) {
+    const previousEntries = await findPreviousEntries(date);
+
+    if (!previousEntries || previousEntries.length === 0) return;
+
+    const previousProjectId = previousEntries[previousEntries.length - 1]?.project_id ?? "";
+    const projectId = activeProjects.some((project) => project.id === previousProjectId)
+      ? previousProjectId
+      : activeProjects[0]?.id ?? "";
+
+    if (selectedDateRef.current !== date || !projectId) return;
+
+    setEntryForm((current) => ({
+      ...current,
+      projectId
+    }));
   }
 
   async function addProject(event: FormEvent<HTMLFormElement>) {
@@ -783,6 +871,7 @@ export function TimeTracker({
         <DayActionMenu
           date={actionMenuDate}
           onClose={() => setActionMenuDate(null)}
+          onCopyPreviousDay={() => void copyPreviousDayEntries(actionMenuDate)}
           onNewEntry={() => openNewEntryFromActions(actionMenuDate)}
           onSelectDayType={() => openQuickDayType(actionMenuDate)}
         />
@@ -1161,11 +1250,13 @@ function DayModal({
 function DayActionMenu({
   date,
   onClose,
+  onCopyPreviousDay,
   onNewEntry,
   onSelectDayType
 }: {
   date: string;
   onClose: () => void;
+  onCopyPreviousDay: () => void;
   onNewEntry: () => void;
   onSelectDayType: () => void;
 }) {
@@ -1186,6 +1277,13 @@ function DayActionMenu({
               onClick={onNewEntry}
             >
               New time entry
+            </button>
+            <button
+              className="min-h-12 rounded-md border border-line px-4 py-3 text-left font-semibold text-ink hover:bg-mist"
+              type="button"
+              onClick={onCopyPreviousDay}
+            >
+              Copy previous day
             </button>
             <button
               className="min-h-12 rounded-md border border-line px-4 py-3 text-left font-semibold text-ink hover:bg-mist"
