@@ -112,7 +112,13 @@ function buildCalendarDays(monthStart: string): CalendarDay[] {
   });
 }
 
-export function TimeTracker() {
+export function TimeTracker({
+  userEmail,
+  userId
+}: {
+  userEmail: string;
+  userId: string;
+}) {
   const [currentMonth, setCurrentMonth] = useState(monthStartISO(todayISO()));
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [dayRecords, setDayRecords] = useState<DayRecord[]>([]);
@@ -313,7 +319,8 @@ export function TimeTracker() {
     const payload = {
       date: selectedDate,
       day_type: dayType,
-      note: dayNote.trim() || null
+      note: dayNote.trim() || null,
+      user_id: userId
     };
 
     const request = selectedRecord
@@ -344,7 +351,7 @@ export function TimeTracker() {
       return;
     }
 
-    const { error } = await supabase.from("projects").insert({ name });
+    const { error } = await supabase.from("projects").insert({ name, user_id: userId });
 
     if (error) {
       setStatus(error.message);
@@ -482,7 +489,8 @@ export function TimeTracker() {
       date: selectedDate,
       project_id: entryForm.projectId,
       hours,
-      note: entryForm.note.trim() || null
+      note: entryForm.note.trim() || null,
+      user_id: userId
     };
 
     const request = editingEntryId
@@ -585,6 +593,7 @@ export function TimeTracker() {
               onProjectNameChange={setProjectName}
               onRestore={restoreProject}
             />
+            <LogoutPanel userEmail={userEmail} />
           </aside>
         </div>
       </div>
@@ -1305,6 +1314,26 @@ function ProjectAccordion({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function LogoutPanel({ userEmail }: { userEmail: string }) {
+  async function logOut() {
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
+
+  return (
+    <section className="rounded-md border border-line bg-white p-4 shadow-soft">
+      <p className="truncate text-sm text-ink/65">{userEmail}</p>
+      <button
+        className="mt-3 min-h-11 w-full rounded-md border border-line px-3 py-2 font-semibold text-ink hover:bg-mist"
+        type="button"
+        onClick={logOut}
+      >
+        Log out
+      </button>
+    </section>
   );
 }
 
