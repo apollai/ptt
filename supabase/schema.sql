@@ -17,7 +17,7 @@ create table if not exists public.day_records (
   created_at timestamp with time zone not null default now(),
   updated_at timestamp with time zone not null default now(),
   constraint day_records_day_type_check
-    check (day_type in ('working_day', 'vacation', 'sick_leave', 'holiday'))
+    check (day_type in ('working_day', 'vacation', 'sick_leave', 'holiday', 'weekend'))
 );
 
 create table if not exists public.time_entries (

@@ -42,7 +42,8 @@ const dayTypeOptions: Array<{ value: DayType; label: string; shortLabel: string 
   { value: "working_day", label: "Working day", shortLabel: "Work" },
   { value: "vacation", label: "Vacation", shortLabel: "Vacation" },
   { value: "sick_leave", label: "Sick leave", shortLabel: "Sick" },
-  { value: "holiday", label: "Holiday", shortLabel: "Holiday" }
+  { value: "holiday", label: "Holiday", shortLabel: "Holiday" },
+  { value: "weekend", label: "Weekend", shortLabel: "Weekend" }
 ];
 
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -845,7 +846,7 @@ function Calendar({
             <CalendarCell
               key={day.date}
               day={day}
-              dayType={record?.day_type ?? "working_day"}
+              explicitDayType={record?.day_type ?? null}
               hours={hours}
               onOpenActions={onOpenActions}
               onOpenDay={onOpenDay}
@@ -859,13 +860,13 @@ function Calendar({
 
 function CalendarCell({
   day,
-  dayType,
+  explicitDayType,
   hours,
   onOpenActions,
   onOpenDay
 }: {
   day: CalendarDay;
-  dayType: DayType;
+  explicitDayType: DayType | null;
   hours: number;
   onOpenActions: (date: string) => void;
   onOpenDay: (date: string) => void;
@@ -873,9 +874,10 @@ function CalendarCell({
   const longPressTimer = useRef<number | null>(null);
   const suppressClick = useRef(false);
   const today = todayISO();
-  const explicitNonWorking = dayType !== "working_day";
+  const displayDayType = explicitDayType ?? "working_day";
+  const explicitNonWorking = explicitDayType !== null && explicitDayType !== "working_day";
   const overtime = Math.max(hours - 8, 0);
-  const cellTone = getCellTone(day.date, dayType, hours);
+  const cellTone = getCellTone(day.date, explicitDayType, hours);
   const toneClass = getCellToneClass(cellTone);
   const todayClass = day.date === today ? "ring-2 ring-blue ring-offset-2 ring-offset-white" : "";
   const dimClass = day.inMonth ? "" : "opacity-35";
@@ -937,25 +939,26 @@ function CalendarCell({
       ) : null}
       {explicitNonWorking ? (
         <span className="mt-auto max-w-full truncate rounded-md bg-white/75 px-1 py-0.5 text-[10px] font-bold leading-tight sm:px-1.5 sm:text-[11px]">
-          {getDayTypeShortLabel(dayType)}
+          {getDayTypeShortLabel(displayDayType)}
         </span>
       ) : null}
     </button>
   );
 }
 
-function getCellTone(date: string, dayType: DayType, hours: number) {
+function getCellTone(date: string, explicitDayType: DayType | null, hours: number) {
   const today = todayISO();
 
-  if (dayType === "vacation") return "vacation";
-  if (dayType === "sick_leave") return "sick";
-  if (dayType === "holiday") return "holiday";
-  if (isWeekend(date)) return "weekend";
+  if (explicitDayType === "vacation") return "vacation";
+  if (explicitDayType === "sick_leave") return "sick";
+  if (explicitDayType === "holiday") return "holiday";
+  if (explicitDayType === "weekend") return "weekend";
+  if (!explicitDayType && isWeekend(date)) return "weekend";
   if (date > today) return "future";
   if (date < today && hours > 0) return "worked";
   if (date < today && hours === 0) return "missing";
 
-  return "future";
+  return hours > 0 ? "worked" : "future";
 }
 
 function getCellToneClass(tone: string) {

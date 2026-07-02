@@ -6,7 +6,7 @@ export type Project = {
   created_at: string;
 };
 
-export type DayType = "working_day" | "vacation" | "sick_leave" | "holiday";
+export type DayType = "working_day" | "vacation" | "sick_leave" | "holiday" | "weekend";
 
 export type DayRecord = {
   id: string;
