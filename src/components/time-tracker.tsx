@@ -173,18 +173,39 @@ export function TimeTracker({
   const selectedTotalHours = selectedDate ? hoursByDate.get(selectedDate) ?? 0 : 0;
   const selectedOvertimeHours = Math.max(selectedTotalHours - 8, 0);
   const isWorkingDay = dayType === "working_day";
+  const selectedMonthStart = currentMonth;
+  const selectedMonthEnd = monthEndISO(currentMonth);
+
+  const selectedMonthEntries = useMemo(() => {
+    return monthEntries.filter(
+      (entry) => entry.date >= selectedMonthStart && entry.date <= selectedMonthEnd
+    );
+  }, [monthEntries, selectedMonthEnd, selectedMonthStart]);
+
+  const selectedMonthDayRecords = useMemo(() => {
+    return dayRecords.filter(
+      (record) => record.date >= selectedMonthStart && record.date <= selectedMonthEnd
+    );
+  }, [dayRecords, selectedMonthEnd, selectedMonthStart]);
 
   const monthlySummary = useMemo<MonthlySummary>(() => {
-    const start = currentMonth;
-    const end = monthEndISO(currentMonth);
-    const monthDays = calendarDays.filter((day) => day.date >= start && day.date <= end);
-    const workedHours = monthEntries.reduce((sum, entry) => sum + Number(entry.hours), 0);
+    const monthDays = calendarDays.filter(
+      (day) => day.date >= selectedMonthStart && day.date <= selectedMonthEnd
+    );
+    const workedHours = selectedMonthEntries.reduce(
+      (sum, entry) => sum + Number(entry.hours),
+      0
+    );
     const overtimeHours = monthDays.reduce((sum, day) => {
       return sum + Math.max((hoursByDate.get(day.date) ?? 0) - 8, 0);
     }, 0);
 
-    const vacationDays = dayRecords.filter((record) => record.day_type === "vacation").length;
-    const sickLeaveDays = dayRecords.filter((record) => record.day_type === "sick_leave").length;
+    const vacationDays = selectedMonthDayRecords.filter(
+      (record) => record.day_type === "vacation"
+    ).length;
+    const sickLeaveDays = selectedMonthDayRecords.filter(
+      (record) => record.day_type === "sick_leave"
+    ).length;
 
     return {
       workedHours,
@@ -192,12 +213,19 @@ export function TimeTracker({
       vacationDays,
       sickLeaveDays
     };
-  }, [calendarDays, currentMonth, dayRecords, hoursByDate, monthEntries]);
+  }, [
+    calendarDays,
+    hoursByDate,
+    selectedMonthDayRecords,
+    selectedMonthEnd,
+    selectedMonthEntries,
+    selectedMonthStart
+  ]);
 
   const monthlyList = useMemo<MonthlyListDay[]>(() => {
     const byDate = new Map<string, Map<string, number>>();
 
-    monthEntries.forEach((entry) => {
+    selectedMonthEntries.forEach((entry) => {
       const projectName = entry.projects?.name ?? "Deleted project";
       const projectHours = byDate.get(entry.date) ?? new Map<string, number>();
       projectHours.set(projectName, (projectHours.get(projectName) ?? 0) + Number(entry.hours));
@@ -212,7 +240,7 @@ export function TimeTracker({
           .sort(([nameA], [nameB]) => nameA.localeCompare(nameB))
           .map(([name, hours]) => ({ name, hours }))
       }));
-  }, [monthEntries]);
+  }, [selectedMonthEntries]);
 
   const monthlyListText = useMemo(() => {
     return monthlyList
@@ -260,8 +288,8 @@ export function TimeTracker({
 
   async function loadMonthData() {
     setIsLoadingMonth(true);
-    const start = currentMonth;
-    const end = monthEndISO(currentMonth);
+    const start = calendarDays[0]?.date ?? currentMonth;
+    const end = calendarDays[calendarDays.length - 1]?.date ?? monthEndISO(currentMonth);
 
     const [dayRecordsResult, entriesResult] = await Promise.all([
       supabase
