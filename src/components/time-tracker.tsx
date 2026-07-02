@@ -56,6 +56,58 @@ function getDayTypeShortLabel(dayType: DayType) {
   return dayTypeOptions.find((option) => option.value === dayType)?.shortLabel ?? "Work";
 }
 
+function DayTypeIcon({ dayType }: { dayType: DayType }) {
+  if (dayType === "vacation") {
+    return (
+      <span
+        className="mt-auto inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/75 text-blue"
+        aria-label="Vacation"
+        title="Vacation"
+      >
+        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2" />
+          <path
+            d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+        </svg>
+      </span>
+    );
+  }
+
+  if (dayType === "sick_leave") {
+    return (
+      <span
+        className="mt-auto inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/75 text-red-700"
+        aria-label="Sick leave"
+        title="Sick leave"
+      >
+        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" stroke="currentColor" strokeLinecap="round" strokeWidth="4" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (dayType === "holiday") {
+    return (
+      <span
+        className="mt-auto inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/75 text-orange-700"
+        aria-label="Holiday"
+        title="Holiday"
+      >
+        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="m12 2.8 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 16.7l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 2.8Z" />
+        </svg>
+      </span>
+    );
+  }
+
+  return null;
+}
+
 function parseISODate(date: string) {
   const [year, month, day] = date.split("-").map(Number);
   return new Date(year, month - 1, day);
@@ -875,7 +927,6 @@ function CalendarCell({
   const suppressClick = useRef(false);
   const today = todayISO();
   const displayDayType = explicitDayType ?? "working_day";
-  const explicitNonWorking = explicitDayType !== null && explicitDayType !== "working_day";
   const overtime = Math.max(hours - 8, 0);
   const cellTone = getCellTone(day.date, explicitDayType, hours);
   const toneClass = getCellToneClass(cellTone);
@@ -937,11 +988,7 @@ function CalendarCell({
           +{formatHours(overtime)} h
         </span>
       ) : null}
-      {explicitNonWorking ? (
-        <span className="mt-auto max-w-full truncate rounded-md bg-white/75 px-1 py-0.5 text-[10px] font-bold leading-tight sm:px-1.5 sm:text-[11px]">
-          {getDayTypeShortLabel(displayDayType)}
-        </span>
-      ) : null}
+      <DayTypeIcon dayType={displayDayType} />
     </button>
   );
 }
