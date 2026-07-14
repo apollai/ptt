@@ -302,7 +302,7 @@ export function TimeTracker({
   }, [selectedMonthEntries]);
 
   const monthlyListText = useMemo(() => {
-    return monthlyList
+    const entriesText = monthlyList
       .map((day) => {
         const projects = day.projects
           .map((project) => `${project.name}: ${formatHours(project.hours)} h`)
@@ -311,7 +311,11 @@ export function TimeTracker({
         return `${day.date} - ${projects}`;
       })
       .join("\n");
-  }, [monthlyList]);
+
+    const summaryText = `Total worked hours: ${formatHours(monthlySummary.workedHours)} h`;
+
+    return entriesText ? `${summaryText}\n${entriesText}` : summaryText;
+  }, [monthlyList, monthlySummary.workedHours]);
 
   useEffect(() => {
     void loadProjects();
@@ -927,6 +931,7 @@ export function TimeTracker({
           monthLabel={formatMonth(currentMonth)}
           monthlyList={monthlyList}
           monthlyListText={monthlyListText}
+          totalWorkedHours={monthlySummary.workedHours}
           onClose={() => setIsMonthlyListOpen(false)}
         />
       ) : null}
@@ -956,8 +961,7 @@ export function TimeTracker({
 
 function MonthlySummaryPanel({ summary }: { summary: MonthlySummary }) {
   return (
-    <section className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-5">
-      <SummaryCard label="Worked hours" value={`${formatHours(summary.workedHours)} h`} />
+    <section className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
       <SummaryCard
         label="Overtime hours"
         tone={summary.overtimeHours > 0 ? "warm" : "neutral"}
@@ -1486,11 +1490,13 @@ function MonthlyListModal({
   monthLabel,
   monthlyList,
   monthlyListText,
+  totalWorkedHours,
   onClose
 }: {
   monthLabel: string;
   monthlyList: MonthlyListDay[];
   monthlyListText: string;
+  totalWorkedHours: number;
   onClose: () => void;
 }) {
   async function copyMonthlyList() {
@@ -1532,6 +1538,10 @@ function MonthlyListModal({
         </div>
 
         <div className="grid gap-3 p-3 sm:p-4">
+          <p className="rounded-md border border-line bg-white p-4 font-semibold text-ink">
+            Total worked hours: {formatHours(totalWorkedHours)} h
+          </p>
+
           {monthlyList.length === 0 ? (
             <p className="rounded-md border border-line bg-white p-4 text-sm text-ink/70">
               No time entries for this month.
