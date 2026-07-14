@@ -13,6 +13,7 @@ export type DayRecord = {
   user_id: string;
   date: string;
   day_type: DayType;
+  out_of_office_hours: number;
   note: string | null;
   created_at: string;
   updated_at: string;

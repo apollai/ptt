@@ -13,11 +13,14 @@ create table if not exists public.day_records (
   user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
   date date not null,
   day_type text not null default 'working_day',
+  out_of_office_hours numeric not null default 0,
   note text,
   created_at timestamp with time zone not null default now(),
   updated_at timestamp with time zone not null default now(),
   constraint day_records_day_type_check
-    check (day_type in ('working_day', 'vacation', 'sick_leave', 'holiday', 'weekend'))
+    check (day_type in ('working_day', 'vacation', 'sick_leave', 'holiday', 'weekend')),
+  constraint day_records_out_of_office_hours_nonnegative_check
+    check (out_of_office_hours >= 0)
 );
 
 create table if not exists public.time_entries (

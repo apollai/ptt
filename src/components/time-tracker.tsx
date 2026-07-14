@@ -9,7 +9,6 @@ import type { DayRecord, DayType, Project, TimeEntry } from "@/lib/types";
 type EntryFormState = {
   projectId: string;
   hours: string;
-  note: string;
 };
 
 type CalendarDay = {
@@ -21,6 +20,7 @@ type CalendarDay = {
 type MonthlySummary = {
   workedHours: number;
   overtimeHours: number;
+  outOfOfficeHours: number;
   vacationDays: number;
   sickLeaveDays: number;
 };
@@ -35,8 +35,7 @@ type MonthlyListDay = {
 
 const emptyEntryForm: EntryFormState = {
   projectId: "",
-  hours: "",
-  note: ""
+  hours: ""
 };
 
 const dayTypeOptions: Array<{ value: DayType; label: string; shortLabel: string }> = [
@@ -170,6 +169,7 @@ export function TimeTracker({
   const [dayType, setDayType] = useState<DayType>("working_day");
   const [dayNote, setDayNote] = useState("");
   const [entryForm, setEntryForm] = useState<EntryFormState>(emptyEntryForm);
+  const [outOfOfficeHours, setOutOfOfficeHours] = useState("");
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [isLoadingMonth, setIsLoadingMonth] = useState(true);
@@ -212,9 +212,19 @@ export function TimeTracker({
     return grouped;
   }, [monthEntries]);
 
+  const outOfOfficeByDate = useMemo(() => {
+    return new Map(
+      dayRecords.map((record) => [
+        record.date,
+        Number(record.out_of_office_hours ?? 0)
+      ])
+    );
+  }, [dayRecords]);
+
   const selectedRecord = selectedDate ? dayRecordByDate.get(selectedDate) ?? null : null;
   const selectedEntries = selectedDate ? entriesByDate.get(selectedDate) ?? [] : [];
   const selectedTotalHours = selectedDate ? hoursByDate.get(selectedDate) ?? 0 : 0;
+  const selectedOutOfOfficeHours = selectedDate ? outOfOfficeByDate.get(selectedDate) ?? 0 : 0;
   const selectedOvertimeHours = Math.max(selectedTotalHours - 8, 0);
   const isWorkingDay = dayType === "working_day";
   const selectedMonthStart = currentMonth;
@@ -243,6 +253,10 @@ export function TimeTracker({
     const overtimeHours = monthDays.reduce((sum, day) => {
       return sum + Math.max((hoursByDate.get(day.date) ?? 0) - 8, 0);
     }, 0);
+    const monthlyOutOfOfficeHours = selectedMonthDayRecords.reduce(
+      (sum, record) => sum + Number(record.out_of_office_hours ?? 0),
+      0
+    );
 
     const vacationDays = selectedMonthDayRecords.filter(
       (record) => record.day_type === "vacation"
@@ -254,6 +268,7 @@ export function TimeTracker({
     return {
       workedHours,
       overtimeHours,
+      outOfOfficeHours: monthlyOutOfOfficeHours,
       vacationDays,
       sickLeaveDays
     };
@@ -378,6 +393,7 @@ export function TimeTracker({
     setSelectedDate(date);
     setDayType(record?.day_type ?? "working_day");
     setDayNote(record?.note ?? "");
+    setOutOfOfficeHours(record?.out_of_office_hours ? String(record.out_of_office_hours) : "");
     resetEntryForm();
     setStatus("");
     void preselectPreviousProject(date);
@@ -434,6 +450,7 @@ export function TimeTracker({
   function closeDayModal() {
     setSelectedDate(null);
     setEditingEntryId(null);
+    setOutOfOfficeHours("");
     resetEntryForm();
   }
 
@@ -446,6 +463,7 @@ export function TimeTracker({
       date: selectedDate,
       day_type: dayType,
       note: dayNote.trim() || null,
+      out_of_office_hours: selectedRecord?.out_of_office_hours ?? 0,
       user_id: userId
     };
 
@@ -478,6 +496,7 @@ export function TimeTracker({
       date: quickDayTypeDate,
       day_type: quickDayType,
       note: record?.note ?? null,
+      out_of_office_hours: record?.out_of_office_hours ?? 0,
       user_id: userId
     };
 
@@ -695,7 +714,6 @@ export function TimeTracker({
       date: selectedDate,
       project_id: entryForm.projectId,
       hours,
-      note: entryForm.note.trim() || null,
       user_id: userId
     };
 
@@ -719,8 +737,7 @@ export function TimeTracker({
     setEditingEntryId(entry.id);
     setEntryForm({
       projectId: entry.project_id ?? "",
-      hours: String(entry.hours),
-      note: entry.note ?? ""
+      hours: String(entry.hours)
     });
   }
 
@@ -728,9 +745,62 @@ export function TimeTracker({
     setEditingEntryId(null);
     setEntryForm({
       projectId: activeProjects[0]?.id ?? "",
-      hours: "",
-      note: ""
+      hours: ""
     });
+  }
+
+  async function saveOutOfOfficeEntry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedDate) return;
+
+    const hours = outOfOfficeHours.trim() ? Number(outOfOfficeHours) : 0;
+
+    if (!Number.isFinite(hours) || hours < 0) {
+      setStatus("Enter out-of-office hours of zero or greater.");
+      return;
+    }
+
+    const payload = {
+      date: selectedDate,
+      day_type: selectedRecord?.day_type ?? "working_day",
+      note: selectedRecord?.note ?? null,
+      out_of_office_hours: hours,
+      user_id: userId
+    };
+
+    const request = selectedRecord
+      ? supabase.from("day_records").update(payload).eq("id", selectedRecord.id)
+      : supabase.from("day_records").insert(payload);
+
+    const { error } = await request;
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setOutOfOfficeHours(hours > 0 ? String(hours) : "");
+    setStatus("");
+    await loadMonthData();
+  }
+
+  async function deleteOutOfOfficeEntry() {
+    if (!selectedDate || !selectedRecord) return;
+
+    const { error } = await supabase
+      .from("day_records")
+      .update({ out_of_office_hours: 0 })
+      .eq("id", selectedRecord.id);
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setOutOfOfficeHours("");
+    setStatus("");
+    await loadMonthData();
   }
 
   async function deleteEntry(entryId: string) {
@@ -789,6 +859,7 @@ export function TimeTracker({
               dayRecordByDate={dayRecordByDate}
               hoursByDate={hoursByDate}
               isLoading={isLoadingMonth}
+              outOfOfficeByDate={outOfOfficeByDate}
               onNextMonth={() => setCurrentMonth(addMonths(currentMonth, 1))}
               onOpenActions={openDayActions}
               onOpenDay={openDay}
@@ -830,6 +901,9 @@ export function TimeTracker({
           editingEntryId={editingEntryId}
           entries={selectedEntries}
           entryForm={entryForm}
+          dayRecord={selectedRecord}
+          outOfOfficeHours={outOfOfficeHours}
+          outOfOfficeTotal={selectedOutOfOfficeHours}
           overtimeHours={selectedOvertimeHours}
           selectedDate={selectedDate}
           totalHours={selectedTotalHours}
@@ -837,10 +911,13 @@ export function TimeTracker({
           onDayNoteChange={setDayNote}
           onDayTypeChange={setDayType}
           onDeleteEntry={deleteEntry}
+          onDeleteOutOfOffice={deleteOutOfOfficeEntry}
           onEntryChange={setEntryForm}
+          onOutOfOfficeHoursChange={setOutOfOfficeHours}
           onResetEntry={resetEntryForm}
           onSaveDay={saveDayRecord}
           onSaveEntry={saveEntry}
+          onSaveOutOfOffice={saveOutOfOfficeEntry}
           onStartEntryEdit={startEntryEdit}
         />
       ) : null}
@@ -879,12 +956,17 @@ export function TimeTracker({
 
 function MonthlySummaryPanel({ summary }: { summary: MonthlySummary }) {
   return (
-    <section className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
+    <section className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-5">
       <SummaryCard label="Worked hours" value={`${formatHours(summary.workedHours)} h`} />
       <SummaryCard
         label="Overtime hours"
         tone={summary.overtimeHours > 0 ? "warm" : "neutral"}
         value={`${formatHours(summary.overtimeHours)} h`}
+      />
+      <SummaryCard
+        label="Out of office"
+        tone="yellow"
+        value={`-${formatHours(summary.outOfOfficeHours)} h`}
       />
       <SummaryCard label="Vacation days" tone="blue" value={String(summary.vacationDays)} />
       <SummaryCard label="Sick leave days" tone="purple" value={String(summary.sickLeaveDays)} />
@@ -898,6 +980,7 @@ function Calendar({
   dayRecordByDate,
   hoursByDate,
   isLoading,
+  outOfOfficeByDate,
   onNextMonth,
   onOpenActions,
   onOpenDay,
@@ -911,6 +994,7 @@ function Calendar({
   dayRecordByDate: Map<string, DayRecord>;
   hoursByDate: Map<string, number>;
   isLoading: boolean;
+  outOfOfficeByDate: Map<string, number>;
   onNextMonth: () => void;
   onOpenActions: (date: string) => void;
   onOpenDay: (date: string) => void;
@@ -969,6 +1053,7 @@ function Calendar({
         {days.map((day) => {
           const record = dayRecordByDate.get(day.date);
           const hours = hoursByDate.get(day.date) ?? 0;
+          const outOfOfficeHours = outOfOfficeByDate.get(day.date) ?? 0;
 
           return (
             <CalendarCell
@@ -976,6 +1061,7 @@ function Calendar({
               day={day}
               explicitDayType={record?.day_type ?? null}
               hours={hours}
+              outOfOfficeHours={outOfOfficeHours}
               onOpenActions={onOpenActions}
               onOpenDay={onOpenDay}
             />
@@ -990,12 +1076,14 @@ function CalendarCell({
   day,
   explicitDayType,
   hours,
+  outOfOfficeHours,
   onOpenActions,
   onOpenDay
 }: {
   day: CalendarDay;
   explicitDayType: DayType | null;
   hours: number;
+  outOfOfficeHours: number;
   onOpenActions: (date: string) => void;
   onOpenDay: (date: string) => void;
 }) {
@@ -1064,6 +1152,11 @@ function CalendarCell({
           +{formatHours(overtime)} h
         </span>
       ) : null}
+      {outOfOfficeHours > 0 ? (
+        <span className="max-w-full truncate text-[10px] font-bold leading-tight text-yellow-600 sm:text-[11px]">
+          -{formatHours(outOfOfficeHours)} h
+        </span>
+      ) : null}
       <DayTypeIcon dayType={displayDayType} />
     </button>
   );
@@ -1110,6 +1203,9 @@ function DayModal({
   editingEntryId,
   entries,
   entryForm,
+  dayRecord,
+  outOfOfficeHours,
+  outOfOfficeTotal,
   overtimeHours,
   selectedDate,
   totalHours,
@@ -1117,10 +1213,13 @@ function DayModal({
   onDayNoteChange,
   onDayTypeChange,
   onDeleteEntry,
+  onDeleteOutOfOffice,
   onEntryChange,
+  onOutOfOfficeHoursChange,
   onResetEntry,
   onSaveDay,
   onSaveEntry,
+  onSaveOutOfOffice,
   onStartEntryEdit
 }: {
   activeProjects: Project[];
@@ -1129,6 +1228,9 @@ function DayModal({
   editingEntryId: string | null;
   entries: TimeEntry[];
   entryForm: EntryFormState;
+  dayRecord: DayRecord | null;
+  outOfOfficeHours: string;
+  outOfOfficeTotal: number;
   overtimeHours: number;
   selectedDate: string;
   totalHours: number;
@@ -1136,10 +1238,13 @@ function DayModal({
   onDayNoteChange: (value: string) => void;
   onDayTypeChange: (value: DayType) => void;
   onDeleteEntry: (entryId: string) => void;
+  onDeleteOutOfOffice: () => void;
   onEntryChange: (value: EntryFormState) => void;
+  onOutOfOfficeHoursChange: (value: string) => void;
   onResetEntry: () => void;
   onSaveDay: (event: FormEvent<HTMLFormElement>) => void;
   onSaveEntry: (event: FormEvent<HTMLFormElement>) => void;
+  onSaveOutOfOffice: (event: FormEvent<HTMLFormElement>) => void;
   onStartEntryEdit: (entry: TimeEntry) => void;
 }) {
   const isWorkingDay = dayType === "working_day";
@@ -1183,8 +1288,17 @@ function DayModal({
             onEdit={onStartEntryEdit}
           />
 
-          <section className={overtimeHours > 0 ? "grid grid-cols-2 gap-2 sm:gap-3" : "grid gap-2 sm:gap-3"}>
-            <SummaryCard label="Daily total" value={`${formatHours(totalHours)} h`} />
+          <OutOfOfficeForm
+            hours={outOfOfficeHours}
+            outOfOfficeTotal={outOfOfficeTotal}
+            hasDayRecord={Boolean(dayRecord)}
+            onChange={onOutOfOfficeHoursChange}
+            onDelete={onDeleteOutOfOffice}
+            onSubmit={onSaveOutOfOffice}
+          />
+
+          <section className="grid gap-2 sm:grid-cols-3 sm:gap-3">
+            <SummaryCard label="Worked" value={`${formatHours(totalHours)} h`} />
             {overtimeHours > 0 ? (
               <SummaryCard
                 label="Overtime"
@@ -1192,6 +1306,11 @@ function DayModal({
                 value={`${formatHours(overtimeHours)} h`}
               />
             ) : null}
+            <SummaryCard
+              label="Out of office"
+              tone="yellow"
+              value={`-${formatHours(outOfOfficeTotal)} h`}
+            />
           </section>
 
           <form onSubmit={onSaveDay} className="rounded-md border border-line bg-white p-4">
@@ -1528,17 +1647,70 @@ function EntryForm({
             </button>
           </div>
         </div>
-
-        <label className="mt-4 block text-sm font-medium text-ink">
-          Note
-          <textarea
-            className="mt-2 min-h-20 rounded-md border border-line bg-white px-3 py-3 text-base outline-none ring-blue/20 focus:ring-4"
-            value={entryForm.note}
-            onChange={(event) => onChange({ ...entryForm, note: event.target.value })}
-          />
-        </label>
       </fieldset>
     </form>
+  );
+}
+
+function OutOfOfficeForm({
+  hours,
+  hasDayRecord,
+  outOfOfficeTotal,
+  onChange,
+  onDelete,
+  onSubmit
+}: {
+  hours: string;
+  hasDayRecord: boolean;
+  outOfOfficeTotal: number;
+  onChange: (value: string) => void;
+  onDelete: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const hasOutOfOfficeHours = outOfOfficeTotal > 0;
+
+  return (
+    <section className="rounded-md border border-line bg-white p-4">
+      <div className="flex flex-col justify-between gap-3 border-b border-line pb-4 sm:flex-row sm:items-center">
+        <div>
+          <h3 className="text-lg font-semibold text-ink">Out of office</h3>
+          {hasOutOfOfficeHours ? (
+            <p className="mt-1 text-sm text-ink/65">
+              Current value: -{formatHours(outOfOfficeTotal)} h
+            </p>
+          ) : null}
+        </div>
+        {hasOutOfOfficeHours ? (
+          <button
+            className="min-h-11 rounded-md border border-clay px-3 py-2 text-sm font-semibold text-clay hover:bg-clay hover:text-white"
+            type="button"
+            onClick={onDelete}
+          >
+            Delete
+          </button>
+        ) : null}
+      </div>
+
+      <form className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2" onSubmit={onSubmit}>
+        <label className="text-sm font-medium text-ink">
+          Hours
+          <input
+            className="mt-2 min-h-12 rounded-md border border-line bg-white px-3 py-3 text-base outline-none ring-blue/20 focus:ring-4"
+            min="0"
+            step="0.25"
+            type="number"
+            value={hours}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        </label>
+        <button
+          className="min-h-12 rounded-md bg-ink px-4 py-3 font-semibold text-white hover:bg-moss"
+          type="submit"
+        >
+          {hasDayRecord ? "Update" : "Save"}
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -1567,9 +1739,6 @@ function DailyEntries({
                   <h4 className="truncate font-semibold text-ink">
                     {entry.projects?.name ?? "Deleted project"}
                   </h4>
-                  {entry.note ? (
-                    <p className="mt-1 break-words text-sm text-ink/70">{entry.note}</p>
-                  ) : null}
                 </div>
                 <p className="shrink-0 text-lg font-semibold text-ink">
                   {formatHours(Number(entry.hours))} h
@@ -1759,7 +1928,7 @@ function SummaryCard({
   value
 }: {
   label: string;
-  tone?: "neutral" | "warm" | "danger" | "blue" | "purple" | "orange";
+  tone?: "neutral" | "warm" | "danger" | "blue" | "purple" | "orange" | "yellow";
   value: string;
 }) {
   const toneClass = {
@@ -1768,7 +1937,8 @@ function SummaryCard({
     danger: "text-red-700",
     blue: "text-blue",
     purple: "text-purple-800",
-    orange: "text-orange-800"
+    orange: "text-orange-800",
+    yellow: "text-yellow-600"
   }[tone];
 
   return (
